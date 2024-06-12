@@ -26,7 +26,7 @@ pub struct Chip8 {
     v: [u8; 16],        // General Purpose Registers v0 - vF
     index: u16,         // Index Register
     pc: u16,            // Program Counter
-    sp: u8,             // Stack Pointer
+    sp: u16,             // Stack Pointer
     stack: [u16; 16],   // Stack
     memory: [u8; 4096], // Memory
     delay_timer: u8,    // Delay Timer
@@ -81,14 +81,14 @@ impl Chip8 {
     // Main emulation/program loop
     pub fn run(&mut self) {
         loop {
-            self.opcode = self.fetch_opcode();      // Fetch
-            self.decode_execute(self.opcode);       // Decode and Execute
+            self.opcode = self.fetch_opcode();  // Fetch
+            self.decode_execute(self.opcode);   // Decode and Execute
             
-            if self.delay_timer > 0 {               // Update delay timer
+            if self.delay_timer > 0 {           // Update delay timer
                 self.delay_timer -= 1;
             }
 
-            if self.sound_timer > 0 {               // Update sound timer
+            if self.sound_timer > 0 {           // Update sound timer
                 self.sound_timer -= 1;
             }
 
@@ -112,21 +112,43 @@ impl Chip8 {
             }
             0x1000 => self.jmp(opcode),         // Jump to address NNN
             0x2000 => self.jsr(opcode),         // Jump to subroutine NNN
-            0x3000 => self.skeq_c(opcode),      // Skip next instruction if v[x] == rr
-            0x4000 => self.skne_c(opcode),      // Skip next instruction if v[X] != rr
+            0x3000 => self.skeq_c(opcode),      // Skip next instruction if v[x] == NN
+            0x4000 => self.skne_c(opcode),      // Skip next instruction if v[X] != NN
             0x5000 => self.skeq_r(opcode),      // Skip next instruction if v[X] == v[Y]
-            0x6000 => self.mov_c(opcode),       // Move constant rr to register v[X]
-            0x7000 => self.add_c(opcode),       // Add constant rr to register v[X]
+            0x6000 => self.mov_c(opcode),       // Move constant NN to v[X]
+            0x7000 => self.add_c(opcode),       // Add constant NN to v[X]
             0x8000 => match opcode & 0x000F {
-                0x000 => self.mov_r(opcode),    // Move register v[Y] into v[X]
-                0x001 => self.or_r(opcode),     // OR register v[Y] with v[X]
-                0x002 => self.and_r(opcode),    // AND register v[Y] with v[X]
-                0x003 => self.xor_r(opcode),    // XOR register v[Y] with v[X]
-                0x004 => self.add_r(opcode),    // Add register v[Y] with v[X]
-                0x005 => self.sub_r(opcode),    // Subtract register v[Y] from v[X]
-                0x006 => self.shr_r(opcode),    // Shift register v[X] right
-                0x007 => self.rsb_r(opcode),    // Subtract register v[X] from v[Y]
-                0x00E => self.shl_r(opcode),    // Shift register v[X] left
+                0x000 => self.mov_r(opcode),    // Move v[Y] into v[X]
+                0x001 => self.or_r(opcode),     // OR v[Y] with v[X]
+                0x002 => self.and_r(opcode),    // AND v[Y] with v[X]
+                0x003 => self.xor_r(opcode),    // XOR v[Y] with v[X]
+                0x004 => self.add_r(opcode),    // Add v[Y] with v[X]
+                0x005 => self.sub_r(opcode),    // Subtract v[Y] from v[X]
+                0x006 => self.shr_r(opcode),    // Shift v[X] right
+                0x007 => self.rsb_r(opcode),    // Subtract v[X] from v[Y]
+                0x00E => self.shl_r(opcode),    // Shift v[X] left
+                _ => self.pc += 2,              // Skip unknown code
+            }
+            0x9000 => self.skne_r(opcode),      // Skip next instruction if v[X] != v[Y]
+            0xA000 => self.mvi(opcode),         // Move constant NNN to I
+            0xB000 => self.jmi(opcode),         // Jump to address NNN + v[0]
+            0xC000 => self.rand(opcode),        // Set v[X] = rand AND NN
+            0xD000 => self.sprite(opcode),      // Draw sprite at (v[X], v[Y]), height N
+            0xE000 => match opcode & 0x000F {
+                0x000E => self.skpr(opcode),    // Skip next instruction if key rK is pressed
+                0x0001 => self.skup(opcode),    // Skip next instruction if key rK is not pressed
+                _ => self.pc += 2,              // Skip unknown code
+            }
+            0xF000 => match opcode & 0x00FF {
+                0x0007 => self.gdelay(opcode),  // Get delay timer into vX
+                0x000a => self.key(opcode),     // Wait for keypress and store in vX
+                0x0015 => self.sdelay(opcode),  // Set delay timer to vX
+                0x0018 => self.ssound(opcode),  // Set sound timer to vX
+                0x001e => self.adi(opcode),     // Add vX to I
+                0x0029 => self.font(opcode),    // Point I to the sprite for hexadecimal character vX
+                0x0033 => self.bcd(opcode),     // Store bcd of vX at I, I+1, I+2
+                0x0055 => self.str(opcode),     // Store v0 - vX at I incremented each time
+                0x0065 => self.ldr(opcode),     // Load registers v0 - vX from I incremented each time
                 _ => self.pc += 2,              // Skip unknown code
             }
             _ => self.pc += 2,                  // Skip unknown code
@@ -166,59 +188,59 @@ impl Chip8 {
         self.pc = opcode & 0x0FFF;                  // Set current memory position to provided address
     }
 
-    // 3XRR
-    // Skip next instruction if register vX == constant RR
+    // 3XNN
+    // Skip next instruction if register vX == constant NN
     fn skeq_c(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;      // Extract X register
-        let rr = (opcode & 0x00FF) as u8;                  // Extract rr constant
+        let nn = (opcode & 0x00FF) as u8;                  // Extract NN constant
 
-        if self.v[x] == rr {
+        if self.v[x] == nn {
             self.pc += 2;                                      // Increment program counter by 2 = skip next instruction
         }
         self.pc += 2;                                          // Increment counter
     }
 
-    // 4XRR
-    // Skip next instruction if register vX != constant RR
+    // 4XNN
+    // Skip next instruction if register vX != constant NN
     fn skne_c(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;      // Extract X register
-        let rr = (opcode & 0x00FF) as u8;                  // Extract rr constant
+        let nn = (opcode & 0x00FF) as u8;                  // Extract NN constant
 
-        if self.v[x] != rr {
+        if self.v[x] != nn {
             self.pc += 2;                                      // Increment program counter by 2 = skip next instruction
         }
         self.pc += 2;                                          // Increment counter
     }
 
     // 0x5XY0
-    // Skip next instruction if register vX != register vY
+    // Skip next instruction if register vX == register vY
     fn skeq_r(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;      // Extract X register
         let y = ((opcode & 0x00F0) >> 4) as usize;      // Extract Y register
 
-        if self.v[x] != self.v[y] {
+        if self.v[x] == self.v[y] {
             self.pc += 2;                                      // Increment program counter by 2 = skip next instruction
         }
         self.pc += 2;                                          // Increment counter
     }
 
-    // 0x6XRR
-    // Move constant rr to register vX
+    // 0x6XNN
+    // Move constant NN to register vX
     fn mov_c(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
-        let rr = (opcode & 0x00FF) as u8;                   // Extract rr constant
+        let nn = (opcode & 0x00FF) as u8;                   // Extract NN constant
 
-        self.v[x] = rr;                                         // set vX = rr
+        self.v[x] = nn;                                         // set vX = NN
         self.pc += 2;                                           // Increment counter
     }
 
-    // 0x7XRR
-    // Add constant rr to register vX, no carry generated
+    // 0x7XNN
+    // Add constant NN to register vX, no carry generated
     fn add_c(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
-        let rr = (opcode & 0x00FF) as u8;                   // Extract rr constant
+        let nn = (opcode & 0x00FF) as u8;                   // Extract NN constant
 
-        self.v[x] = self.v[x].wrapping_add(rr);                 // Add rr to vX
+        self.v[x] = self.v[x].wrapping_add(nn);                 // Add NN to vX
         self.pc += 2;                                           // Increment counter
     }
 
@@ -331,5 +353,107 @@ impl Chip8 {
         self.v[0xF] = (self.v[x] & 0x80) >> 7;                  // Store LSB in Flag register
         self.v[x] <<= 1;                                        // Right shift register vX
         self.pc += 2;                                           // Increment counter
+    }
+
+    // 9XY0
+    // Skip next instruction if register vX != register vY
+    fn skne_r(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
+        let y = ((opcode & 0x00F0) >> 4) as usize;       // Extract Y register
+
+        if self.v[x] != self.v[y] {
+            self.pc += 2;                                      // Increment program counter by 2 = skip next instruction
+        }
+        self.pc += 2;                                          // Increment counter
+    }
+
+    // ANNN
+    // Load index register I with constant NNN
+    fn mvi(&mut self, opcode: u16) {
+
+    }
+
+    // BNNN
+    // Jump to address NNN + register v0
+    fn jmi(&mut self, opcode: u16) {
+
+    }
+
+    // CXNN
+    // Set register vX to a random number AND NN
+    fn rand(&mut self, opcode: u16) {
+
+    }
+
+    // DXYN
+    // Draw a sprite at screen location (vX, vY) height N
+    fn sprite(&mut self, opcode: u16) {
+
+    }
+
+    // EK9E
+    // Skip if key rK is pressed
+    fn skpr(&mut self, opcode: u16) {
+
+    }
+
+    // EKA1
+    // Skip if key rK is not pressed
+    fn skup(&mut self, opcode: u16) {
+
+    }
+
+    // FX07
+    // Get delay timer into vX
+    fn gdelay(&mut self, opcode: u16) {
+
+    }
+
+    // FX0A
+    // Wait for keypress, put key in register vX
+    fn key(&mut self, opcode: u16) {
+
+    }
+
+    // FX15
+    // Set the delay timer to vX
+    fn sdelay(&mut self, opcode: u16) {
+
+    }
+
+    // FX18
+    // Set the sound timer to vX
+    fn ssound(&mut self, opcode: u16) {
+
+    }
+
+    // FX1E
+    // Add register vX to the index register I
+    fn adi(&mut self, opcode: u16) {
+
+    }
+
+    // FX29
+    // Point I to the sprite for hexadecimal character in vX
+    fn font(&mut self, opcode: u16) {
+
+    }
+
+    // FX33
+    // Store the bcd representation of register vX at location I, I+1, I+2
+    fn bcd(&mut self, opcode: u16) {
+
+    }
+
+    // FX55
+    // Store registers v)-vX at location I onwards, incrementing I to the next location each time
+    fn str(&mut self, opcode: u16) {
+
+    }
+
+    // FX65
+    // Load registers v0 to vX from location I onwards, incrementing I to the next location each time
+    fn ldr(&mut self, opcode: u16) {
+
     }
 }
