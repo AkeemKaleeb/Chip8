@@ -1,6 +1,11 @@
 use rand::Rng;
 use std::fs::File;
 use std::io::Read;
+use sdl2::pixels::Color;
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+use sdl2::rect::Rect;
+use std::time::Duration;
 
 const WIDTH: usize = 64;
 const HEIGHT: usize = 32;
@@ -87,7 +92,69 @@ impl Chip8 {
         Ok(())
     }
 
-    // Main emulation/program loop
+    // Display and Input Setup as well as emulation loop
+    pub fn run(&mut self) -> Result<(), String>{
+        // Video Render
+        let sdl_context = sdl2::init()?;
+        let video_subsystem = sdl_context.video()?;
+
+        let window = video_subsystem.window("Chip8 Emu", (WIDTH * 10) as u32, (HEIGHT * 10) as u32)
+            .position_centered()
+            .build()
+            .expect("could not initialize video subsystem");
+
+        let mut canvas = window.into_canvas().build()
+            .expect("could not make a canvas");
+
+        canvas.set_draw_color(Color::RGB(0, 0, 0));
+        canvas.clear();
+        canvas.present();
+        let mut event_pump = sdl_context.event_pump()?;
+
+        // Game Loop
+        'running: loop {
+
+            // Event Handler
+            for event in event_pump.poll_iter() {
+                match event {
+                    Event::Quit {..} |
+                    Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
+                        break 'running;
+                    },
+                    _ => {}
+                }
+            }
+
+            // Proceed to next instruction
+            self.cycle();
+
+            // Redraw screen if it has been updated
+            if self.draw_flag {
+                for y in 0..HEIGHT {
+                    for x in 0..WIDTH {
+                        let idx = x + y * WIDTH;
+                        // Set the color to draw to white
+                        if self.display[idx] == 1 {
+                            canvas.set_draw_color(Color::RGB(255, 255, 255));
+                        }
+                        // Set the color to draw to black = erase pixel
+                        else {
+                            canvas.set_draw_color(Color::RGB(0, 0, 0));
+                        }
+                        canvas.fill_rect(Rect::new((x * 10) as i32, (y * 10) as i32, 10, 10)).unwrap();
+                    }
+                }
+
+                self.draw_flag = false; // Reset the draw flag
+                canvas.present();       // Copy to output display
+            }
+
+            ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+            }
+        Ok(())    
+    }
+
+    // 1 step emulation loop
     pub fn cycle(&mut self) {
         self.opcode = self.fetch_opcode();  // Fetch
         self.decode_execute(self.opcode);   // Decode and Execute
@@ -167,6 +234,11 @@ impl Chip8 {
     // 0x00E0
     // Clear the display implementation
     fn cls(&mut self) {
+        for i in 0..self.display.len() {
+            self.display[i] = 0x0;
+        }
+
+        self.draw_flag = true;
         self.pc += 2;                       // Increment counter
     }
 
