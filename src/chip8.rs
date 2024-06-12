@@ -1,6 +1,9 @@
 use rand::Rng;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::Read;
+
+const WIDTH: usize = 64;
+const HEIGHT: usize = 32;
 
 // Fontset stored between 0x50 and onwards
 const CHIP8_FONTSET: [u8; 80] = [
@@ -24,18 +27,18 @@ const CHIP8_FONTSET: [u8; 80] = [
 
 // Chip8 components struct
 pub struct Chip8 {
-    v: [u8; 16],                // General Purpose Registers v0 - vF
-    index: u16,                 // Index Register
-    pc: u16,                    // Program Counter
-    sp: u16,                    // Stack Pointer
-    stack: [u16; 16],           // Stack
-    memory: [u8; 4096],         // Memory
-    delay_timer: u8,            // Delay Timer
-    sound_timer: u8,            // Sound Timer
-    opcode: u16,                // Program Opperation Code
-    display: [u8; 64 * 32],     // Display
-    key:[u8; 16],               // Input keys
-    draw_flag: bool,            // Determine whether or not to update screen
+    v: [u8; 16],                    // General Purpose Registers v0 - vF
+    index: u16,                     // Index Register
+    pc: u16,                        // Program Counter
+    sp: u16,                        // Stack Pointer
+    stack: [u16; 16],               // Stack
+    memory: [u8; 4096],             // Memory
+    delay_timer: u8,                // Delay Timer
+    sound_timer: u8,                // Sound Timer
+    opcode: u16,                    // Program Opperation Code
+    display: [u8; WIDTH * HEIGHT],  // Display
+    key:[u8; 16],                   // Input keys
+    draw_flag: bool,                // Determine whether or not to update screen
 }
 
 impl Chip8 {
@@ -52,7 +55,7 @@ impl Chip8 {
             delay_timer: 0,
             sound_timer: 0,
             opcode: 0,
-            display: [0; 64 * 32],
+            display: [0; WIDTH * HEIGHT],
             key: [0; 16],
             draw_flag: false,
         };
@@ -85,21 +88,16 @@ impl Chip8 {
     }
 
     // Main emulation/program loop
-    pub fn run(&mut self) {
-        loop {
-            self.opcode = self.fetch_opcode();  // Fetch
-            self.decode_execute(self.opcode);   // Decode and Execute
-            
-            if self.delay_timer > 0 {           // Update delay timer
-                self.delay_timer -= 1;
-            }
+    pub fn cycle(&mut self) {
+        self.opcode = self.fetch_opcode();  // Fetch
+        self.decode_execute(self.opcode);   // Decode and Execute
 
-            if self.sound_timer > 0 {           // Update sound timer
-                self.sound_timer -= 1;
-            }
+        if self.delay_timer > 0 {           // Update delay timer
+            self.delay_timer -= 1;
+        }
 
-            // Sleep for 1/60th of a second to emulate 60 Hz cycle
-            std::thread::sleep(std::time::Duration::from_millis(16));
+        if self.sound_timer > 0 {           // Update sound timer
+            self.sound_timer -= 1;
         }
     }
 
@@ -412,7 +410,7 @@ impl Chip8 {
 
         // Loop through line by line and update display map
         for yline in 0..height {
-            pixel = self.memory[(self.index as usize + yline as usize)];
+            pixel = self.memory[self.index as usize + yline as usize];
             for xline in 0..8 {
                 if (pixel & (0x80 >> xline)) != 0 {
                     if self.display[x + xline + ((y + yline as usize) * 64)] == 1 {
@@ -432,7 +430,7 @@ impl Chip8 {
     fn skpr(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
 
-        if (self.key[self.v[x] as usize] >> 8) != 0 {
+        if (self.key[self.v[x] as usize]) != 0 {
             self.pc += 2;                                       // Skip next instruction
         }
 
@@ -444,7 +442,7 @@ impl Chip8 {
     fn skup(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
 
-        if (self.key[self.v[x] as usize] >> 8) == 0 {
+        if (self.key[self.v[x] as usize]) == 0 {
             self.pc += 2;                                       // Skip next instruction
         }
 
@@ -462,7 +460,7 @@ impl Chip8 {
 
     // FX0A
     // Wait for keypress, put key in register vX
-    fn key(&mut self, opcode: u16) {
+    fn key(&mut self, _opcode: u16) {
 
     }
 
