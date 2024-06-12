@@ -2,6 +2,7 @@ use std::env;
 use sdl2::pixels::Color;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
+use sdl2::rect::Rect;
 use std::time::Duration;
 
 mod chip8;
@@ -51,7 +52,24 @@ fn main() -> Result<(), String> {
         }
         chip8.cycle();
 
-        canvas.present();
+        if chip8.draw_flag {
+            for y in 0..HEIGHT {
+                for x in 0..WIDTH {
+                    let idx = x + y * WIDTH;
+                    if chip8.display[idx] == 1 {
+                        canvas.set_draw_color(Color::RGB(255, 255, 255));
+                    }
+                    else {
+                        canvas.set_draw_color(Color::RGB(0, 0, 0));
+                    }
+                    canvas.fill_rect(Rect::new((x * 10) as i32, (y * 10) as i32, 10, 10)).unwrap();
+                }
+            }
+
+            chip8.draw_flag = false;
+            canvas.present();
+        }
+
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
     }
 

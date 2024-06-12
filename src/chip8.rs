@@ -36,9 +36,9 @@ pub struct Chip8 {
     delay_timer: u8,                // Delay Timer
     sound_timer: u8,                // Sound Timer
     opcode: u16,                    // Program Opperation Code
-    display: [u8; WIDTH * HEIGHT],  // Display
+    pub display: [u8; WIDTH * HEIGHT],  // Display
     key:[u8; 16],                   // Input keys
-    draw_flag: bool,                // Determine whether or not to update screen
+    pub draw_flag: bool,            // Determine whether or not to update screen
 }
 
 impl Chip8 {
@@ -401,22 +401,24 @@ impl Chip8 {
     // DXYN
     // Draw a sprite at screen location (vX, vY) height N
     fn sprite(&mut self, opcode: u16) {
-        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
-        let y = ((opcode & 0x00F0) >> 4) as usize;       // Extract Y register
-        let height = opcode & 0x000F;                      // Extract height
-        let mut pixel: u8;
+        let vx = self.v[((opcode & 0x0F00) >> 8) as usize] as usize; // Extract X register
+        let vy = self.v[((opcode & 0x00F0) >> 4) as usize] as usize; // Extract Y register
+        let height: usize = (opcode & 0x000F) as usize;                     // Extract height
 
-        self.v[0xF] = 0;                                        // Reset flag register
+        self.v[0xF] = 0;                                                    // Reset flag register
 
         // Loop through line by line and update display map
         for yline in 0..height {
-            pixel = self.memory[self.index as usize + yline as usize];
+            let pixel = self.memory[self.index as usize + yline];
             for xline in 0..8 {
                 if (pixel & (0x80 >> xline)) != 0 {
-                    if self.display[x + xline + ((y + yline as usize) * 64)] == 1 {
+                    let x_pos = (vx + xline) % 64;
+                    let y_pos = (vy + yline) % 32;
+                    let idx = x_pos + (y_pos * 64);
+                    if self.display[idx] == 1 {
                         self.v[0xF] = 1;
                     }
-                    self.display[x + xline + ((y + yline as usize) * 64)] ^= 1;
+                    self.display[idx] ^= 1;
                 }
             }
         }
