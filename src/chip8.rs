@@ -1,3 +1,4 @@
+use rand::Rng;
 use std::fs::File;
 use std::io::{self, Read};
 
@@ -23,15 +24,18 @@ const CHIP8_FONTSET: [u8; 80] = [
 
 // Chip8 components struct
 pub struct Chip8 {
-    v: [u8; 16],        // General Purpose Registers v0 - vF
-    index: u16,         // Index Register
-    pc: u16,            // Program Counter
-    sp: u16,             // Stack Pointer
-    stack: [u16; 16],   // Stack
-    memory: [u8; 4096], // Memory
-    delay_timer: u8,    // Delay Timer
-    sound_timer: u8,    // Sound Timer
-    opcode: u16,        // Program Opperation Code
+    v: [u8; 16],                // General Purpose Registers v0 - vF
+    index: u16,                 // Index Register
+    pc: u16,                    // Program Counter
+    sp: u16,                    // Stack Pointer
+    stack: [u16; 16],           // Stack
+    memory: [u8; 4096],         // Memory
+    delay_timer: u8,            // Delay Timer
+    sound_timer: u8,            // Sound Timer
+    opcode: u16,                // Program Opperation Code
+    display: [u8; 64 * 32],     // Display
+    key:[u8; 16],               // Input keys
+    draw_flag: bool,            // Determine whether or not to update screen
 }
 
 impl Chip8 {
@@ -48,6 +52,9 @@ impl Chip8 {
             delay_timer: 0,
             sound_timer: 0,
             opcode: 0,
+            display: [0; 64 * 32],
+            key: [0; 16],
+            draw_flag: false,
         };
         chip8.load_fontset();
         chip8
@@ -74,7 +81,6 @@ impl Chip8 {
                 break;
             }
         }
-
         Ok(())
     }
 
@@ -135,8 +141,8 @@ impl Chip8 {
             0xC000 => self.rand(opcode),        // Set v[X] = rand AND NN
             0xD000 => self.sprite(opcode),      // Draw sprite at (v[X], v[Y]), height N
             0xE000 => match opcode & 0x000F {
-                0x000E => self.skpr(opcode),    // Skip next instruction if key rK is pressed
-                0x0001 => self.skup(opcode),    // Skip next instruction if key rK is not pressed
+                0x000E => self.skpr(opcode),    // Skip next instruction if key rX is pressed
+                0x0001 => self.skup(opcode),    // Skip next instruction if key rX is not pressed
                 _ => self.pc += 2,              // Skip unknown code
             }
             0xF000 => match opcode & 0x00FF {
@@ -163,7 +169,7 @@ impl Chip8 {
     // 0x00E0
     // Clear the display implementation
     fn cls(&mut self) {
-        self.pc += 2;                           // Increment counter
+        self.pc += 2;                       // Increment counter
     }
 
     // 0x00EE
@@ -370,43 +376,88 @@ impl Chip8 {
     // ANNN
     // Load index register I with constant NNN
     fn mvi(&mut self, opcode: u16) {
+        let nnn = (opcode & 0x0FFF) as u16;    // Extract NNN constant
 
+        self.index = nnn;                           // Set index register to constant
+        self.pc += 2;
     }
 
     // BNNN
     // Jump to address NNN + register v0
     fn jmi(&mut self, opcode: u16) {
+        let nnn = (opcode & 0x0FFF) as u8;      // Extract NNN constant
 
+        self.pc = (nnn + self.v[0]) as u16;         // Point program counter to new address
     }
 
     // CXNN
     // Set register vX to a random number AND NN
     fn rand(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
+        let nn = (opcode & 0x00FF) as u8;                   // Extract NN constant
+        let mut rng = rand::thread_rng();            // Create random generator
 
+        self.v[x] = rng.gen::<u8>() & nn;                       // Set X register to random number AND nn
     }
 
     // DXYN
     // Draw a sprite at screen location (vX, vY) height N
     fn sprite(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
+        let y = ((opcode & 0x00F0) >> 4) as usize;       // Extract Y register
+        let height = opcode & 0x000F;                      // Extract height
+        let mut pixel: u8;
 
+        self.v[0xF] = 0;                                        // Reset flag register
+
+        // Loop through line by line and update display map
+        for yline in 0..height {
+            pixel = self.memory[(self.index as usize + yline as usize)];
+            for xline in 0..8 {
+                if (pixel & (0x80 >> xline)) != 0 {
+                    if self.display[x + xline + ((y + yline as usize) * 64)] == 1 {
+                        self.v[0xF] = 1;
+                    }
+                    self.display[x + xline + ((y + yline as usize) * 64)] ^= 1;
+                }
+            }
+        }
+
+        self.draw_flag = true;                                  // Update screen needs redrawing
+        self.pc += 2;
     }
 
-    // EK9E
-    // Skip if key rK is pressed
+    // EX9E
+    // Skip if key rX is pressed
     fn skpr(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
 
+        if (self.key[self.v[x] as usize] >> 8) != 0 {
+            self.pc += 2;                                       // Skip next instruction
+        }
+
+        self.pc += 2;
     }
 
-    // EKA1
-    // Skip if key rK is not pressed
+    // EXA1
+    // Skip if key rX is not pressed
     fn skup(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
 
+        if (self.key[self.v[x] as usize] >> 8) == 0 {
+            self.pc += 2;                                       // Skip next instruction
+        }
+
+        self.pc += 2;
     }
 
     // FX07
     // Get delay timer into vX
     fn gdelay(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
 
+        self.v[x] = self.delay_timer;                           // Load register X with delay timer
+        self.pc += 2;
     }
 
     // FX0A
@@ -418,42 +469,72 @@ impl Chip8 {
     // FX15
     // Set the delay timer to vX
     fn sdelay(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
 
+        self.v[x] = self.sound_timer;                           // Load register X with sound timer
+        self.pc += 2;
     }
 
     // FX18
     // Set the sound timer to vX
     fn ssound(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
 
+        self.sound_timer = self.v[x];                           // Load register X with sound timer
+        self.pc += 2;
     }
 
     // FX1E
     // Add register vX to the index register I
     fn adi(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
 
+        self.index += self.v[x] as u16;                         // Add vX to index
+        self.pc += 2;
     }
 
     // FX29
     // Point I to the sprite for hexadecimal character in vX
     fn font(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
 
+        self.index = (0x50 + (self.v[x] * 5)) as u16;
+        self.pc += 2;
     }
 
     // FX33
     // Store the bcd representation of register vX at location I, I+1, I+2
     fn bcd(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;              // Extract X register
+        
+        self.memory[self.index as usize] = self.v[x] / 100;             // Get hundreds location
+        self.memory[self.index as usize + 1] = (self.v[x] / 10) % 10;   // Get tens location
+        self.memory[self.index as usize + 2] = (self.v[x] % 100) % 10;  // Get ones location
 
+        self.pc += 2;
     }
 
     // FX55
-    // Store registers v)-vX at location I onwards, incrementing I to the next location each time
+    // Store registers v0-vX at location I onwards, incrementing I to the next location each time
     fn str(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;              // Extract X register
 
+        for i in 0..=x {
+            self.memory[self.index as usize + i] = self.v[i];
+        }
+
+        self.pc += 2;
     }
 
     // FX65
     // Load registers v0 to vX from location I onwards, incrementing I to the next location each time
     fn ldr(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;              // Extract X register
 
+        for i in 0..=x {
+            self.v[i] = self.memory[self.index as usize + i];
+        }
+
+        self.pc += 2;
     }
 }
