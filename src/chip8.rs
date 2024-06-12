@@ -32,18 +32,18 @@ const CHIP8_FONTSET: [u8; 80] = [
 
 // Chip8 components struct
 pub struct Chip8 {
-    v: [u8; 16],                    // General Purpose Registers v0 - vF
-    index: u16,                     // Index Register
-    pc: u16,                        // Program Counter
-    sp: u16,                        // Stack Pointer
-    stack: [u16; 16],               // Stack
-    memory: [u8; 4096],             // Memory
-    delay_timer: u8,                // Delay Timer
-    sound_timer: u8,                // Sound Timer
-    opcode: u16,                    // Program Opperation Code
+    v: [u8; 16],                        // General Purpose Registers v0 - vF
+    index: u16,                         // Index Register
+    pc: u16,                            // Program Counter
+    sp: u16,                            // Stack Pointer
+    stack: [u16; 16],                   // Stack
+    memory: [u8; 4096],                 // Memory
+    delay_timer: u8,                    // Delay Timer
+    sound_timer: u8,                    // Sound Timer
+    opcode: u16,                        // Program Opperation Code
     pub display: [u8; WIDTH * HEIGHT],  // Display
-    key:[u8; 16],                   // Input keys
-    pub draw_flag: bool,            // Determine whether or not to update screen
+    key:[u8; 16],                       // Input keys
+    pub draw_flag: bool,                // Determine whether or not to update screen
 }
 
 impl Chip8 {
@@ -121,6 +121,18 @@ impl Chip8 {
                     Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                         break 'running;
                     },
+                    Event::KeyDown { keycode: Some(key), ..} => {
+                        match key {
+                           Keycode::Num1 => self.set_key(1, 1),
+                            _ => (),
+                        }
+                    },
+                    Event::KeyUp { keycode: Some(key), ..} => {
+                        match key {
+                           Keycode::Num1 => self.set_key(1, 0),
+                            _ => (),
+                        }
+                    },
                     _ => {}
                 }
             }
@@ -149,6 +161,7 @@ impl Chip8 {
                 canvas.present();       // Copy to output display
             }
 
+            // Sleep for 1/60 of a second, emulate 60 hz clock
             ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
             }
         Ok(())    
@@ -224,7 +237,10 @@ impl Chip8 {
             }
             _ => self.pc += 2,                  // Skip unknown code
         }
+    }
 
+    fn set_key(&mut self, idx: usize, val:u8) {
+        self.key[idx] = val;
     }
 
     /********************************************/
@@ -537,8 +553,16 @@ impl Chip8 {
 
     // FX0A
     // Wait for keypress, put key in register vX
-    fn key(&mut self, _opcode: u16) {
+    fn key(&mut self, opcode: u16) {
+        let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
 
+        for(idx, &key_state) in self.key.iter().enumerate() {
+            if key_state != 0 {
+                self.v[x] = idx as u8;
+                self.pc += 2;
+                return;
+            }
+        }
     }
 
     // FX15
