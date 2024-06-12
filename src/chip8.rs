@@ -175,7 +175,7 @@ impl Chip8 {
     fn ret(&mut self) {
         self.sp -= 1;                                   // Decrepement stack pointer to get to last call
         self.pc = self.stack[self.sp as usize] - 2;     // Return to the memory address of the subroutine call
-        self.pc += 2;                                   // Increment counter
+        self.pc += 4;                                   // Increment counter
     }
 
     // 1NNN
@@ -294,14 +294,10 @@ impl Chip8 {
         let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
         let y = ((opcode & 0x00F0) >> 4) as usize;       // Extract Y register
 
-        if (self.v[y]) > (0xFF - self.v[x]) {
-            self.v[0xF] = 1;                                    // Carry bit
-        }
-        else {
-            self.v[0xF] = 0;                                    // No carry needed
-        }
+        let (result, carry) = self.v[x].overflowing_add(self.v[y]);
+        self.v[x] = result;
+        self.v[0xF] = carry as u8;
 
-        self.v[x] = self.v[x].wrapping_add(self.v[y]);          // Add registers
         self.pc += 2;                                           // Increment counter
     }
 
@@ -310,15 +306,18 @@ impl Chip8 {
     fn sub_r(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
         let y = ((opcode & 0x00F0) >> 4) as usize;       // Extract Y register
+        let vx = self.v[x] as usize;                    // Extract X register
+        let vy = self.v[y] as usize;                    // Extract Y register
 
-        if self.v[x] >= self.v[y] {
-            self.v[0xf] = 0;                                    // No borrow required
-        }
-        else {
-            self.v[0xf] = 1;                                    // Borrow required
-        }
+        self.v[x] = self.v[x].wrapping_sub(self.v[y]);
 
-        self.v[x] = self.v[x].wrapping_sub(self.v[y]);          // Subtract registers
+        if vx >= vy {
+            self.v[0xF] = 1; // No borrow needed
+        } else {
+            self.v[0xF] = 0; // Borrow occurred
+        }
+    
+
         self.pc += 2;                                           // Increment counter
     }
 
@@ -326,9 +325,10 @@ impl Chip8 {
     // Shift register vX right, bit 0 goes into register vF
     fn shr_r(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
-        
-        self.v[0xF] = self.v[x] & 0x1;                          // Store LSB in Flag register
+        let lsb = self.v[x] & 0x1;
+
         self.v[x] >>= 1;                                        // Right shift register vX
+        self.v[0xF] = lsb;                                      // Store LSB in Flag register
         self.pc += 2;                                           // Increment counter
     }
 
@@ -337,15 +337,17 @@ impl Chip8 {
     fn rsb_r(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
         let y = ((opcode & 0x00F0) >> 4) as usize;       // Extract Y register
+        let vx = self.v[x] as usize;                    // Extract X register
+        let vy = self.v[y] as usize;                    // Extract Y register
 
-        if self.v[y] >= self.v[x] {
-            self.v[0xf] = 0;                                    // No borrow required
-        }
-        else {
-            self.v[0xf] = 1;                                    // Borrow required
-        }
+        self.v[x] = self.v[y].wrapping_sub(self.v[x]);
 
-        self.v[x] = self.v[y].wrapping_sub(self.v[x]);          // Subtract registers
+        if vy >= vx {
+            self.v[0xF] = 1; // No borrow needed
+        } else {
+            self.v[0xF] = 0; // Borrow occurred
+        }
+        
         self.pc += 2;                                           // Increment counter
     }
 
@@ -353,9 +355,10 @@ impl Chip8 {
     // Shift register vX left, bit 7 goes into register vF
     fn shl_r(&mut self, opcode: u16) {
         let x = ((opcode & 0x0F00) >> 8) as usize;       // Extract X register
-        
-        self.v[0xF] = (self.v[x] & 0x80) >> 7;                  // Store LSB in Flag register
+        let msb = (self.v[x] & 0x80) >> 7;
+
         self.v[x] <<= 1;                                        // Right shift register vX
+        self.v[0xF] = msb;                                      // Store LSB in Flag register
         self.pc += 2;                                           // Increment counter
     }
 
